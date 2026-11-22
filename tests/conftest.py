@@ -77,3 +77,49 @@ def split_data(engineered_df):
 def daily_pools():
     rng = np.random.default_rng(42)
     return [rng.uniform(0.6, 0.95, 40) for _ in range(100)]
+
+
+
+# shared fixtures for the new modules
+
+# ── Causal inference DataFrame ────────────────────────────────────────────────
+@pytest.fixture(scope="session")
+def causal_df(engineered_df):
+    from src.feature_engineering import MODEL_FEATURES
+    df = engineered_df.copy()
+    feature_cols = [c for c in MODEL_FEATURES if c in df.columns]
+    return df, feature_cols
+
+
+# ── Fairness evaluation data ─────────────────────────────────────────────────
+@pytest.fixture(scope="session")
+def fairness_data(split_data, engineered_df):
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.linear_model import LogisticRegression
+
+    X_train, X_test, y_train, y_test = split_data
+    pipe = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", LogisticRegression(max_iter=500, random_state=42)),
+    ])
+    pipe.fit(X_train, y_train)
+    y_pred = pipe.predict(X_test)
+    sensitive = engineered_df.loc[X_test.index, "gender"]
+    return pipe, X_train, X_test, y_train, y_test, y_pred, sensitive
+
+
+# ── Pre-trained model ────────────────────────────────────────────────────────
+@pytest.fixture(scope="session")
+def trained_model(split_data):
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.linear_model import LogisticRegression
+
+    X_train, _, y_train, _ = split_data
+    pipe = Pipeline([
+        ("scaler", StandardScaler()),
+        ("clf", LogisticRegression(max_iter=500, random_state=42)),
+    ])
+    pipe.fit(X_train, y_train)
+    return pipe

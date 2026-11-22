@@ -38,6 +38,12 @@ NOTEBOOKS = [
     "06_overbooking_simulator.ipynb",
     "07_advanced_analytics.ipynb",
     "08_reinforcement_learning.ipynb",
+    "09_survival_analysis.ipynb",
+    "10_causal_sms_targeting.ipynb",
+    "11_uncertainty_optimization.ipynb",
+    "12_deep_tabular.ipynb",
+    "13_fairness_mitigation.ipynb",
+    "14_mlops_deployment.ipynb",
 ]
 
 

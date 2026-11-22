@@ -24,6 +24,12 @@ audits model fairness, and includes an optional Q-Learning scheduling agent.
 | Part 2 | Dynamic Overbooking Simulator – Monte Carlo, 3 strategies, cost heatmap |
 | Part 3 | Advanced Analytics – SHAP, K-Means/GMM clustering, T-Learner uplift, PSI drift, MAPIE conformal prediction, Fairlearn fairness audit |
 | Part 4 | Reinforcement Learning – Tabular Q-Learning overbooking agent (optional) |
+| Part 5A | Survival Analysis – Kaplan-Meier, Nelson-Aalen, Cox PH on lead_time_days |
+| Part 5B | Causal Inference & SMS Budget Optimizer – IPW/DR ATE, CATE, budget-constrained targeting, Qini curve |
+| Part 5C | Uncertainty-Aware Optimization – Conformal bounds + Newsvendor overbooking |
+| Part 5D | Deep Tabular Models & Statistical Tests – TabNet, MLP, McNemar's, DeLong's test |
+| Part 5E | Fairness Mitigation – Exponentiated Gradient reduction, before/after comparison |
+| Part 5F | MLOps Deployment – FastAPI + MLflow, model metadata export |
 
 ---
 
@@ -46,7 +52,13 @@ ClinicSense/
 │   ├── 05_prediction_interpretation.ipynb
 │   ├── 06_overbooking_simulator.ipynb
 │   ├── 07_advanced_analytics.ipynb
-│   └── 08_reinforcement_learning.ipynb
+│   ├── 08_reinforcement_learning.ipynb
+│   ├── 09_survival_analysis.ipynb
+│   ├── 10_causal_sms_targeting.ipynb
+│   ├── 11_uncertainty_optimization.ipynb
+│   ├── 12_deep_tabular.ipynb
+│   ├── 13_fairness_mitigation.ipynb
+│   └── 14_mlops_deployment.ipynb
 ├── src/
 │   ├── config.py                      # Central constants and paths
 │   ├── data_loader.py                 # Load and validate CSV
@@ -57,7 +69,13 @@ ClinicSense/
 │   ├── simulator.py                   # Monte Carlo overbooking simulator
 │   ├── advanced_analytics.py          # SHAP, clustering, uplift, PSI, fairness, conformal
 │   ├── rl_agent.py                    # Q-Learning agent and environment
-│   └── report_writer.py              # Writes Markdown + CSV reports to outputs/reports/
+│   ├── report_writer.py              # Writes Markdown + CSV reports to outputs/reports/
+│   ├── survival.py                    # Kaplan-Meier, Nelson-Aalen, Cox PH
+│   ├── causal_inference.py            # IPW/DR ATE, CATE, budget-constrained SMS optimizer
+│   ├── uncertainty_optimization.py    # Conformal bounds + Newsvendor overbooking
+│   ├── deep_tabular.py                # TabNet, MLP, McNemar's, DeLong's test
+│   ├── fairness_mitigation.py         # Exponentiated Gradient + ThresholdOptimizer
+│   └── api_server.py                 # FastAPI endpoints + MLflow logging
 ├── dashboard/
 │   └── app.py                         # Streamlit demo dashboard
 ├── tests/
@@ -71,7 +89,13 @@ ClinicSense/
 │   ├── test_rl_agent.py
 │   ├── test_advanced_analytics.py
 │   ├── test_conformal.py
-│   └── test_report_writer.py
+│   ├── test_report_writer.py
+│   ├── test_survival.py
+│   ├── test_causal_inference.py
+│   ├── test_uncertainty_opt.py
+│   ├── test_deep_tabular.py
+│   ├── test_fairness_mitigation.py
+│   └── test_api_server.py
 ├── outputs/
 │   ├── figures/                       # All saved plots (PNG)
 │   ├── models/                        # Serialised model files (.joblib)
@@ -144,6 +168,12 @@ notebooks depend on.
 | NB06 – Simulator | `best_model_output.joblib` | `outputs/reports/simulation_report_*.md` |
 | NB07 – Advanced | `processed_data.csv`, `splits.joblib`, `best_model_output.joblib`, models | figures, `segmented_data.csv` |
 | NB08 – RL (optional) | `best_model_output.joblib` | `outputs/reports/rl_report_*.md` |
+| NB09 – Survival Analysis | `processed_data.csv`, `splits.joblib` | figures, `survival_report_*.md` |
+| NB10 – Causal SMS Targeting | `processed_data.csv`, `splits.joblib` | figures, `causal_report_*.md` |
+| NB11 – Uncertainty Optimization | `best_model_output.joblib` | figures |
+| NB12 – Deep Tabular | `splits.joblib`, `smote_splits.joblib` | figures, `deep_tabular_report_*.md` |
+| NB13 – Fairness Mitigation | `splits.joblib`, models | figures, `fairness_mitigation_report_*.md` |
+| NB14 – MLOps Deployment | models | `model_metadata.json` |
 
 ### Run all notebooks automatically
 
@@ -181,7 +211,7 @@ python -m pytest -v
 
 **Tests do not require the Kaggle CSV.** All fixtures use synthetic data.
 
-Current result: **72 passed, 0 failed** (as of last verified run).
+Current result: **114 passed, 3 skipped** (as of last verified run).
 
 ---
 
@@ -191,9 +221,23 @@ Current result: **72 passed, 0 failed** (as of last verified run).
 streamlit run dashboard/app.py
 ```
 
-The dashboard opens at `http://localhost:8501`. It uses a simplified rule-based
-probability model for demonstration. For production use, load the trained model
-from `outputs/models/best_model_calibrated.joblib`.
+The dashboard opens at `http://localhost:8501`. It loads the trained model from
+`outputs/models/best_model_calibrated.joblib` if available, with a graceful
+fallback to a rule-based formula for demonstration.
+
+### Dashboard Tabs (v3 – Advanced Analytics Edition)
+
+| Tab | Contents |
+|-----|----------|
+| 📊 Executive Overview | KPI cards (total records, no-show rate, SMS sent, unique patients), appointment status donut, SMS effectiveness bar, age-group breakdown, weekly trend line, today's risk distribution |
+| 🎯 Patient Risk Assessment | Overbooking recommendation with capacity gauge, probability histogram with threshold lines, full appointment schedule table with risk badges & suggested actions, CSV download |
+| ⚙️ Resource Optimization | Doctor workload estimation (configurable # doctors), slot optimization, capacity utilisation gauge, hourly patient flow chart, overcrowding alerts |
+| 📈 Attendance Analytics | Prior no-show distribution, risk by age group, SMS effectiveness on predicted probability, repeat no-show patient identification, attendance by gender |
+| 🔬 What-If Simulator | Interactive overbooking slider, expected shows/no-shows/P(exceed capacity) metrics, dual-axis simulation chart across 0–10 extra bookings, results table, optimal recommendation |
+| 🤖 AI Clinic Assistant | Rule-based chatbot that answers questions about today's simulated schedule (patient counts, risk levels, SMS stats, overbooking, utilisation, peak hours, model info) |
+
+Uses **Plotly** for interactive charts (hover, zoom, pan) and loads the real
+110,527-row Kaggle dataset for the overview analytics.
 
 ---
 
@@ -220,6 +264,10 @@ Reports are written to `outputs/reports/` with timestamps:
 - `simulation_report_YYYYMMDD_HHMMSS.md` + companion `.csv`
 - `rl_report_YYYYMMDD_HHMMSS.md` + companion `.csv`
 - `fairness_report_YYYYMMDD_HHMMSS.md`
+- `survival_report_YYYYMMDD_HHMMSS.md`
+- `causal_report_YYYYMMDD_HHMMSS.md`
+- `deep_tabular_report_YYYYMMDD_HHMMSS.md` + companion `.csv`
+- `fairness_mitigation_report_YYYYMMDD_HHMMSS.md`
 
 ---
 
@@ -263,6 +311,12 @@ Reports are written to `outputs/reports/` with timestamps:
 | Advanced – Clustering | NB07 | ✅ |
 | Advanced – Uplift + Fairness + Drift | NB07 | ✅ |
 | Optional – Reinforcement Learning | NB08 | ✅ |
+| Extension – Survival Analysis | NB09 | ✅ |
+| Extension – Causal Inference & SMS Budget Optimizer | NB10 | ✅ |
+| Extension – Uncertainty-Aware Optimization | NB11 | ✅ |
+| Extension – Deep Tabular + Statistical Tests | NB12 | ✅ |
+| Extension – Fairness Mitigation | NB13 | ✅ |
+| Extension – MLOps / Deployment | NB14 | ✅ |
 
 ---
 
@@ -270,7 +324,8 @@ Reports are written to `outputs/reports/` with timestamps:
 
 Python 3.10, Pandas, NumPy, Scikit-learn, XGBoost 3.x, LightGBM, SHAP,
 imbalanced-learn (SMOTE), Optuna, MAPIE, Fairlearn, scikit-uplift,
-Streamlit, Matplotlib, Seaborn, SciPy, statsmodels, pytest
+lifelines, pytorch-tabnet, FastAPI, MLflow, uvicorn,
+Streamlit, Plotly, Matplotlib, Seaborn, SciPy, statsmodels, pytest
 
 ---
 

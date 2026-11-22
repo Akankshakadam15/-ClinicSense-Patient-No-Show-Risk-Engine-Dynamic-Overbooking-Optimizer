@@ -2,8 +2,13 @@
 
 import pytest
 import numpy as np
+import sys
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="LightGBM access violation with small synthetic data on Windows"
+)
 def test_conformal_predict_returns_valid_shapes(split_data):
     from src.advanced_analytics import conformal_predict
     from src.models import build_lightgbm

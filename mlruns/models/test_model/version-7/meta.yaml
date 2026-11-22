@@ -1,0 +1,14 @@
+aliases: []
+creation_timestamp: 1795314838029
+current_stage: None
+description: null
+last_updated_timestamp: 1795314838029
+name: test_model
+run_id: 976f80ea86814d4a84baeb3ae235854d
+run_link: null
+source: file:///C:/Users/LENOVO/OneDrive/Desktop/final%20project%206%20credict/mlruns/599170981066879502/976f80ea86814d4a84baeb3ae235854d/artifacts/model
+status: READY
+status_message: null
+storage_location: file:///C:/Users/LENOVO/OneDrive/Desktop/final%20project%206%20credict/mlruns/599170981066879502/976f80ea86814d4a84baeb3ae235854d/artifacts/model
+user_id: null
+version: 7

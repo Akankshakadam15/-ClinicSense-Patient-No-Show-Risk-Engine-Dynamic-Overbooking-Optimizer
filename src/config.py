@@ -48,3 +48,26 @@ SHAP_SAMPLE_SIZE = 2000   # rows for SHAP calculation to save time
 
 # ── Overbooking levels to test ─────────────────────────────────────────────────
 FIXED_OB_LEVELS = [0, 1, 2, 3, 4, 5]   # extra bookings above base capacity
+
+# ── Survival Analysis ──────────────────────────────────────────────────────────
+SURVIVAL_DURATION_COL = "lead_time_days"
+SURVIVAL_EVENT_COL    = "no_show"
+
+# ── Causal Inference ──────────────────────────────────────────────────────────
+SMS_BUDGET_DEFAULT = 500    # default SMS budget for optimization
+COST_PER_SMS       = 1.0   # cost per SMS in currency units
+
+# ── Uncertainty Optimization ──────────────────────────────────────────────────
+CONFORMAL_CONFIDENCE = 0.90
+
+# ── Deep Tabular ──────────────────────────────────────────────────────────────
+TABNET_MAX_EPOCHS  = 100
+TABNET_PATIENCE    = 15
+
+# ── Fairness Mitigation ──────────────────────────────────────────────────────
+FAIRNESS_SENSITIVE_FEATURES = ["gender", "scholarship", "age_group_enc"]
+FAIRNESS_EPS               = 0.01   # Exponentiated Gradient tolerance
+
+# ── API Server ────────────────────────────────────────────────────────────────
+API_HOST = "0.0.0.0"
+API_PORT = 8000

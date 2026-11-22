@@ -407,3 +407,679 @@ def write_fairness_report(
         "---",
     ]
     return _save("\n".join(lines) + "\n", fname)
+
+
+
+# ─── 5. Survival Analysis Report ──────────────────────────────────────────────
+def write_survival_report(
+    km_result: pd.DataFrame,
+    cox_result: dict,
+    threshold_result: dict,
+    timestamp: bool = True,
+) -> str:
+    """
+    Write a Markdown survival-analysis report.
+
+    Parameters
+    ----------
+    km_result        : DataFrame from kaplan_meier_estimate()
+                       (columns: time, survival_prob)
+    cox_result       : dict with keys "summary" (DataFrame) and
+                       "concordance_index" (float)
+    threshold_result : dict with keys "daily_rates" (DataFrame),
+                       "median_rate" (float), "threshold_day" (int or None)
+    timestamp        : Add timestamp suffix to filename
+
+    Returns
+    -------
+    Absolute path to the written Markdown file.
+    """
+    if km_result is None or len(km_result) == 0:
+        raise ValueError("km_result is empty – run kaplan_meier_estimate() first.")
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fname   = f"survival_report_{_ts()}.md" if timestamp else "survival_report.md"
+
+    # CSV backup of KM curve data
+    csv_path = fname.replace(".md", ".csv")
+    km_result.round(4).to_csv(os.path.join(REPORTS_DIR, csv_path), index=False)
+
+    # Cox PH summary table
+    cox_summary_md = cox_result["summary"].round(4).to_markdown()
+    c_index        = cox_result["concordance_index"]
+
+    # Lead-time threshold info
+    median_rate    = threshold_result["median_rate"]
+    threshold_day  = threshold_result["threshold_day"]
+    # quick note: the threshold_day is where the hazard crosses the median
+    threshold_str  = (f"**{threshold_day} days** before appointment"
+                      if threshold_day is not None
+                      else "No clear threshold identified")
+
+    lines = [
+        "# ClinicSense – Survival Analysis Report",
+        f"*Generated: {now_str}*",
+        "",
+        "---",
+        "",
+        "## 1. Purpose",
+        "",
+        "This section models patient appointment adherence as a time-to-event",
+        "(survival) problem.  We estimate the probability that a patient still",
+        "intends to attend as a function of lead time (days between scheduling",
+        "and appointment).  Based on Kleinbaum's survival analysis framework",
+        "(Kleinbaum & Klein, *Survival Analysis: A Self-Learning Text*, 3rd ed.).",
+        "",
+        "## 2. Kaplan-Meier Estimates",
+        "",
+        f"The KM curve tracks **{len(km_result)} time points**.",
+        "",
+        "| Statistic | Value |",
+        "|-----------|-------|",
+        f"| Median survival time | {km_result['time'].median():.1f} days |",
+        f"| Min survival prob.   | {km_result['survival_prob'].min():.4f} |",
+        f"| Max survival prob.   | {km_result['survival_prob'].max():.4f} |",
+        "",
+        "## 3. Cox Proportional-Hazards Model",
+        "",
+        cox_summary_md,
+        "",
+        f"**Concordance index:** `{c_index:.4f}`",
+        "  (a C-index above 0.6 indicates useful discrimination;",
+        "   above 0.7 is considered good.)",
+        "",
+        "## 4. Lead-Time Threshold Analysis",
+        "",
+        f"| Metric | Value |",
+        f"|--------|-------|",
+        f"| Median daily no-show rate | {median_rate:.4f} |",
+        f"| Critical lead-time cutoff | {threshold_str} |",
+        "",
+        "Appointments booked further in advance than this threshold show",
+        "a meaningfully higher no-show hazard — a useful signal for the",
+        "clinic's reminder system.",
+        "",
+        "## 5. Plots",
+        "",
+        _fig_md("km_curve.png",            "Kaplan-Meier Survival Curve"),
+        _fig_md("cox_coefficients.png",    "Cox PH Model – Coefficient Forest Plot"),
+        _fig_md("lead_time_hazard.png",    "Lead-Time vs No-Show Hazard Rate"),
+        "",
+        "## 6. Limitations",
+        "",
+        "- The proportional-hazards assumption may not hold for all covariates.",
+        "- Censoring is synthetic (patients who showed up are right-censored).",
+        "- Lead-time effect may be confounded with day-of-week patterns.",
+        "",
+        "---",
+        f"*KM curve data saved to `{csv_path}`.*",
+    ]
+    return _save("\n".join(lines) + "\n", fname)
+
+
+# ─── 6. Causal Inference Report ───────────────────────────────────────────────
+def write_causal_report(
+    ipw_result: dict,
+    dr_result: dict,
+    optimizer_result: dict,
+    timestamp: bool = True,
+) -> str:
+    """
+    Write a Markdown causal-inference / uplift report.
+
+    Parameters
+    ----------
+    ipw_result        : dict with ATE, ATE_ci_lower, ATE_ci_upper
+    dr_result         : dict with ATE, ATE_ci_lower, ATE_ci_upper
+    optimizer_result  : dict with expected_uplift, budget_used,
+                        n_targeted, efficiency_curve
+    timestamp         : Add timestamp suffix to filename
+
+    Returns
+    -------
+    Absolute path to the written Markdown file.
+    """
+    if not ipw_result or not dr_result:
+        raise ValueError("ATE results missing – run causal estimators first.")
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fname   = f"causal_report_{_ts()}.md" if timestamp else "causal_report.md"
+
+    # ATE comparison table  (following Imbens & Rubin 2015 notation)
+    ate_rows = pd.DataFrame([
+        {
+            "Estimator":       "IPW (Inverse Propensity Weighting)",
+            "ATE":             f"{ipw_result['ATE']:.4f}",
+            "95% CI Lower":    f"{ipw_result['ATE_ci_lower']:.4f}",
+            "95% CI Upper":    f"{ipw_result['ATE_ci_upper']:.4f}",
+        },
+        {
+            "Estimator":       "Doubly-Robust (DR)",
+            "ATE":             f"{dr_result['ATE']:.4f}",
+            "95% CI Lower":    f"{dr_result['ATE_ci_lower']:.4f}",
+            "95% CI Upper":    f"{dr_result['ATE_ci_upper']:.4f}",
+        },
+    ]).set_index("Estimator")
+    ate_md = ate_rows.to_markdown()
+
+    # Budget optimizer summary
+    uplift   = optimizer_result["expected_uplift"]
+    budget   = optimizer_result["budget_used"]
+    targeted = optimizer_result["n_targeted"]
+
+    lines = [
+        "# ClinicSense – Causal Inference & Uplift Report",
+        f"*Generated: {now_str}*",
+        "",
+        "---",
+        "",
+        "## 1. Purpose",
+        "",
+        "This report estimates the **Average Treatment Effect (ATE)** of SMS",
+        "reminders on appointment attendance using observational causal-inference",
+        "methods.  Following Imbens & Rubin (2015, *Causal Inference for Statistics,",
+        "Social, and Biomedical Sciences*), we compare IPW and doubly-robust",
+        "estimators to gauge robustness.",
+        "",
+        "## 2. ATE Estimates",
+        "",
+        ate_md,
+        "",
+        "Both estimators should roughly agree — if the CI's overlap the effect",
+        "is robust to model specification.",
+        "",
+        "## 3. Budget-Constrained Targeting",
+        "",
+        "| Parameter | Value |",
+        "|-----------|-------|",
+        f"| Expected uplift (attendance gain) | {uplift:.4f} |",
+        f"| Budget consumed | {budget} |",
+        f"| Patients targeted | {targeted:,} |",
+        "",
+        "The optimizer selects patients with the highest estimated CATE",
+        # targeting those most likely to respond to the reminder
+        "(Conditional ATE) until the budget is exhausted.",
+        "",
+        "## 4. Plots",
+        "",
+        _fig_md("propensity_scores.png",   "Propensity Score Distribution"),
+        _fig_md("cate_distribution.png",   "CATE (Individual Treatment Effect) Distribution"),
+        _fig_md("qini_curve.png",          "Qini Curve – Uplift Model Evaluation"),
+        _fig_md("budget_efficiency.png",   "Budget Efficiency Curve"),
+        "",
+        "## 5. Limitations",
+        "",
+        "- Unobserved confounders (e.g., patient motivation) cannot be controlled",
+        "  for in an observational study.",
+        "- The positivity assumption may be violated for subgroups that almost",
+        "  never / always receive SMS.",
+        "- Budget numbers are illustrative; real costs depend on SMS provider rates.",
+        "",
+        "---",
+    ]
+    return _save("\n".join(lines) + "\n", fname)
+
+
+# ─── 7. Deep Tabular Models Report ────────────────────────────────────────────
+def write_deep_tabular_report(
+    comparison_df: pd.DataFrame,
+    pairwise_df: pd.DataFrame,
+    timestamp: bool = True,
+) -> str:
+    """
+    Write a Markdown report comparing deep-learning tabular models.
+
+    Parameters
+    ----------
+    comparison_df : DataFrame indexed by model name, cols include
+                    accuracy, roc_auc, f1, etc.
+    pairwise_df   : DataFrame with McNemar/DeLong pairwise test results
+    timestamp     : Add timestamp suffix to filename
+
+    Returns
+    -------
+    Absolute path to the written Markdown file.
+    """
+    if comparison_df is None or len(comparison_df) == 0:
+        raise ValueError("comparison_df is empty – no deep-tabular metrics.")
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fname   = f"deep_tabular_report_{_ts()}.md" if timestamp else "deep_tabular_report.md"
+
+    csv_path = fname.replace(".md", ".csv")
+    comparison_df.round(4).to_csv(os.path.join(REPORTS_DIR, csv_path))
+
+    comp_md    = comparison_df.round(4).to_markdown()
+    pairwise_md = pairwise_df.round(4).to_markdown()
+
+    # check if any test is significant (p < 0.05)
+    sig_col = [c for c in pairwise_df.columns if "p" in c.lower()]
+    any_sig = False
+    if sig_col:
+        any_sig = (pairwise_df[sig_col[0]] < 0.05).any()
+
+    # tbh I expected at least one model to dominate, but the stats say otherwise
+    interpretation = (
+        "At least one pair of models shows a statistically significant difference "
+        "(p < 0.05).  See the pairwise table for details."
+        if any_sig
+        else
+        "**No model is statistically significantly better than another** at the "
+        "α = 0.05 level.  This is consistent with recent literature (Grinsztajn et "
+        "al., 2022) showing that gradient-boosted trees remain hard to beat on "
+        "medium-sized tabular datasets.  For deployment, prefer the simplest "
+        "model (e.g., XGBoost) unless latency or interpretability requirements "
+        "differ."
+    )
+
+    lines = [
+        "# ClinicSense – Deep Tabular Model Comparison Report",
+        f"*Generated: {now_str}*",
+        "",
+        "---",
+        "",
+        "## 1. Purpose",
+        "",
+        "We benchmark recent deep-learning architectures for tabular data",
+        "(TabNet, FT-Transformer, NODE, etc.) against tree-based baselines.",
+        "Statistical significance is tested pairwise with McNemar's test",
+        "(accuracy) and the DeLong test (ROC-AUC).",
+        "",
+        "## 2. Performance Table",
+        "",
+        comp_md,
+        "",
+        "## 3. Pairwise Statistical Tests",
+        "",
+        pairwise_md,
+        "",
+        f"### Interpretation",
+        "",
+        interpretation,
+        "",
+        "## 4. Plot",
+        "",
+        _fig_md("model_comparison_deep.png", "Deep Tabular Model – ROC-AUC Comparison"),
+        "",
+        "## 5. Limitations",
+        "",
+        "- Deep models were tuned with limited hyperparameter budgets (Optuna,",
+        "  30 trials each) due to compute constraints — better configs may exist.",
+        "- Dataset size (~110k rows) may be too small to fully exploit deep models.",
+        "- McNemar's test only compares binary predictions; DeLong covers ranking.",
+        "",
+        "---",
+        f"*Raw metrics saved to `{csv_path}`.*",
+    ]
+    return _save("\n".join(lines) + "\n", fname)
+
+
+# ─── 8. Fairness Mitigation Report ────────────────────────────────────────────
+def write_fairness_mitigation_report(
+    before_after_df: pd.DataFrame,
+    timestamp: bool = True,
+) -> str:
+    """
+    Write a Markdown report on fairness mitigation (before vs after).
+
+    Parameters
+    ----------
+    before_after_df : DataFrame with cols Metric, Before, After, Improvement
+    timestamp       : Add timestamp suffix to filename
+
+    Returns
+    -------
+    Absolute path to the written Markdown file.
+    """
+    if before_after_df is None or len(before_after_df) == 0:
+        raise ValueError("before_after_df is empty – run mitigation first.")
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fname   = (f"fairness_mitigation_report_{_ts()}.md"
+               if timestamp else "fairness_mitigation_report.md")
+
+    # save the table as CSV too, handy for the appendix
+    csv_path = fname.replace(".md", ".csv")
+    before_after_df.round(4).to_csv(os.path.join(REPORTS_DIR, csv_path), index=False)
+
+    table_md = before_after_df.round(4).to_markdown(index=False)
+
+    # quick summary stats
+    avg_improvement = before_after_df["Improvement"].mean()
+    best_row        = before_after_df.loc[before_after_df["Improvement"].idxmax()]
+
+    lines = [
+        "# ClinicSense – Fairness Mitigation Report",
+        f"*Generated: {now_str}*",
+        "",
+        "---",
+        "",
+        "## 1. Purpose",
+        "",
+        "After the initial fairness audit flagged moderate disparities, we applied",
+        "in-processing mitigation (threshold adjustment and reweighting) to reduce",
+        "demographic parity and equalized-odds gaps.  This report shows the",
+        "before-vs-after comparison.  Approach follows Hardt et al., 2016,",
+        "*Equality of Opportunity in Supervised Learning*.",
+        "",
+        "## 2. Before vs After Mitigation",
+        "",
+        table_md,
+        "",
+        f"**Average improvement across metrics:** {avg_improvement:.4f}",
+        "",
+        f"**Largest gain:** {best_row['Metric']} improved by "
+        f"{best_row['Improvement']:.4f}.",
+        "",
+        "## 3. Interpretation",
+        "",
+        "A positive improvement means the disparity decreased (fairer).",
+        "If some metrics improved while others worsened slightly, this is",
+        "expected — perfect fairness across all criteria simultaneously is",
+        "generally impossible (Chouldechova, 2017).",
+        "",
+        "## 4. Plot",
+        "",
+        _fig_md("fairness_before_after.png",
+                "Fairness Metrics – Before vs After Mitigation"),
+        "",
+        "## 5. Limitations",
+        "",
+        "- Mitigation may reduce overall predictive accuracy (fairness-accuracy",
+        "  trade-off); monitor ROC-AUC alongside fairness metrics.",
+        "- Only group-level fairness was addressed; individual fairness is not",
+        "  guaranteed.",
+        "",
+        "---",
+        f"*Before/after table saved to `{csv_path}`.*",
+    ]
+    return _save("\n".join(lines) + "\n", fname)
+
+
+# ─── 5. Survival Analysis Report ──────────────────────────────────────────────
+def write_survival_report(
+    km_result: pd.DataFrame,
+    cox_result: dict,
+    threshold_result: dict,
+    timestamp: bool = True,
+) -> str:
+    """
+    Write a Markdown report for the survival analysis chapter.
+    Based on Kleinbaum & Klein's survival analysis framework.
+
+    Parameters
+    ----------
+    km_result        : DataFrame from kaplan_meier_estimate (cols: time, survival_prob)
+    cox_result       : dict with 'summary' (DataFrame) and 'concordance_index' (float)
+    threshold_result : dict with 'daily_rates', 'median_rate', 'threshold_day'
+    """
+    if km_result is None or len(km_result) == 0:
+        raise ValueError("km_result is empty - run kaplan_meier_estimate() first")
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fname   = f"survival_report_{_ts()}.md" if timestamp else "survival_report.md"
+
+    # pull out the cox summary if we have it
+    cox_md = "*Cox model was not fitted.*"
+    c_index = "N/A"
+    if cox_result and "summary" in cox_result:
+        cox_md = cox_result["summary"].round(4).to_markdown()
+        c_index = f"{cox_result.get('concordance_index', 0):.4f}"
+
+    threshold_day = threshold_result.get("threshold_day", "N/A") if threshold_result else "N/A"
+    median_rate   = threshold_result.get("median_rate", "N/A") if threshold_result else "N/A"
+    if isinstance(median_rate, float):
+        median_rate = f"{median_rate:.3f}"
+
+    lines = [
+        "# ClinicSense – Survival Analysis Report",
+        f"*Generated: {now_str}*",
+        "",
+        "---",
+        "",
+        "## 1. Motivation",
+        "",
+        "Instead of treating no-show as a plain binary outcome, I reframed",
+        "lead_time_days as a 'time-to-event' variable.  The event is a no-show.",
+        "This lets us answer: at which lead time does the risk start rising?",
+        "",
+        "## 2. Kaplan-Meier Survival Curve",
+        "",
+        f"The KM estimate was computed on {len(km_result)} unique time points.",
+        "Survival probability = P(patient shows up | lead time >= t).",
+        "",
+        _fig_md("km_curve.png", "Kaplan-Meier Survival Curve"),
+        "",
+        "## 3. Cox Proportional Hazards Model",
+        "",
+        cox_md,
+        "",
+        f"**Concordance index:** `{c_index}`",
+        "",
+        "A concordance > 0.5 means the model ranks risk better than random.",
+        # this interpretation note helped during my viva prep
+        "",
+        _fig_md("cox_coefficients.png", "Cox PH Coefficients"),
+        "",
+        "## 4. Lead-Time Risk Threshold",
+        "",
+        f"| Finding | Value |",
+        f"|---------|-------|",
+        f"| Threshold day (risk inflection) | {threshold_day} |",
+        f"| Median daily no-show rate | {median_rate} |",
+        "",
+        "Patients booked more than this many days ahead have notably higher",
+        "no-show rates, which the clinic can use for targeted reminders.",
+        "",
+        _fig_md("lead_time_hazard.png", "No-Show Rate by Lead Time"),
+        "",
+        "---",
+    ]
+    return _save("\n".join(lines) + "\n", fname)
+
+
+# ─── 6. Causal Inference Report ───────────────────────────────────────────────
+def write_causal_report(
+    ipw_result: dict,
+    dr_result: dict,
+    optimizer_result: dict,
+    timestamp: bool = True,
+) -> str:
+    """
+    Write causal inference / SMS targeting report.
+    Following Imbens & Rubin (2015) for the ATE methodology.
+    """
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fname   = f"causal_report_{_ts()}.md" if timestamp else "causal_report.md"
+
+    # ATE comparison
+    ipw_ate  = ipw_result.get("ATE", "N/A") if ipw_result else "N/A"
+    ipw_lo   = ipw_result.get("ATE_ci_lower", "") if ipw_result else ""
+    ipw_hi   = ipw_result.get("ATE_ci_upper", "") if ipw_result else ""
+
+    dr_ate   = dr_result.get("ATE", "N/A") if dr_result else "N/A"
+    dr_lo    = dr_result.get("ATE_ci_lower", "") if dr_result else ""
+    dr_hi    = dr_result.get("ATE_ci_upper", "") if dr_result else ""
+
+    def _fmt(v):
+        return f"{v:.4f}" if isinstance(v, (int, float)) else str(v)
+
+    # optimizer summary
+    opt_uplift = _fmt(optimizer_result.get("expected_uplift", "N/A")) if optimizer_result else "N/A"
+    opt_budget = optimizer_result.get("budget_used", "N/A") if optimizer_result else "N/A"
+    opt_n      = optimizer_result.get("n_targeted", "N/A") if optimizer_result else "N/A"
+
+    lines = [
+        "# ClinicSense – Causal Inference & SMS Targeting Report",
+        f"*Generated: {now_str}*",
+        "",
+        "---",
+        "",
+        "## 1. Research Question",
+        "",
+        "Does sending an SMS reminder *cause* patients to show up,",
+        "or is it just correlated with attendance?",
+        "We use IPW and doubly-robust ATE to find out.",
+        "",
+        "## 2. Average Treatment Effect (ATE)",
+        "",
+        "| Method | ATE | 95% CI |",
+        "|--------|-----|--------|",
+        f"| IPW (Horvitz-Thompson) | {_fmt(ipw_ate)} | [{_fmt(ipw_lo)}, {_fmt(ipw_hi)}] |",
+        f"| Doubly-Robust | {_fmt(dr_ate)} | [{_fmt(dr_lo)}, {_fmt(dr_hi)}] |",
+        "",
+        "A positive ATE means SMS reminders increase attendance.",
+        "",
+        _fig_md("propensity_scores.png", "Propensity Score Distribution"),
+        "",
+        "## 3. Heterogeneous Effects (CATE)",
+        "",
+        "Not all patients benefit equally from an SMS.  The CATE score",
+        "tells us which patients have the largest treatment effect.",
+        "",
+        _fig_md("cate_distribution.png", "CATE Score Distribution"),
+        _fig_md("qini_curve.png", "Qini Curve – SMS Targeting Quality"),
+        "",
+        "## 4. Budget-Constrained SMS Optimizer",
+        "",
+        f"| Parameter | Value |",
+        f"|-----------|-------|",
+        f"| SMS budget used | {opt_budget} |",
+        f"| Patients targeted | {opt_n} |",
+        f"| Expected uplift (extra attendances) | {opt_uplift} |",
+        "",
+        "The optimizer ranks patients by CATE and allocates SMS messages",
+        "to those with the highest expected benefit first.",
+        "",
+        _fig_md("budget_efficiency.png", "Budget Efficiency Curve"),
+        "",
+        "## 5. Limitations",
+        "",
+        "- Unobserved confounders (e.g., patient motivation) can't be ruled out.",
+        "- The T-Learner CATE is a rough estimate; a causal forest might do better",
+        "  but I didn't have time to implement it properly.",
+        "",
+        "---",
+    ]
+    return _save("\n".join(lines) + "\n", fname)
+
+
+# ─── 7. Deep Tabular Models Report ───────────────────────────────────────────
+def write_deep_tabular_report(
+    comparison_df: pd.DataFrame,
+    pairwise_df: pd.DataFrame,
+    timestamp: bool = True,
+) -> str:
+    """
+    Report comparing classical vs deep tabular models with stat tests.
+    Key finding: tree-based models match or beat deep nets on this dataset.
+    """
+    if comparison_df is None or len(comparison_df) == 0:
+        raise ValueError("comparison_df is empty")
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fname   = f"deep_tabular_report_{_ts()}.md" if timestamp else "deep_tabular_report.md"
+
+    csv_path = fname.replace(".md", ".csv")
+    comparison_df.round(4).to_csv(os.path.join(REPORTS_DIR, csv_path))
+
+    pairwise_md = pairwise_df.round(4).to_markdown() if pairwise_df is not None and len(pairwise_df) > 0 else "*No pairwise tests available.*"
+
+    lines = [
+        "# ClinicSense – Deep Tabular Models Report",
+        f"*Generated: {now_str}*",
+        "",
+        "---",
+        "",
+        "## 1. Purpose",
+        "",
+        "Can deep learning (TabNet, MLP) beat classical tree-based models on",
+        "structured tabular data?  Grinsztajn et al. (NeurIPS 2022) showed",
+        "tree methods still dominate for medium-sized datasets – we test if",
+        "that holds for our no-show prediction task.",
+        "",
+        "## 2. Model Comparison",
+        "",
+        comparison_df.round(4).to_markdown(),
+        "",
+        _fig_md("model_comparison_deep.png", "ROC-AUC Across All Models"),
+        "",
+        "## 3. Statistical Significance Tests",
+        "",
+        "We use McNemar's test (prediction disagreements) and DeLong's test",
+        "(AUC comparison) to check whether differences are significant.",
+        "",
+        pairwise_md,
+        "",
+        "**Interpretation:**",
+        "- p > 0.05 → No statistically significant difference",
+        "- p < 0.05 → Models are significantly different",
+        "",
+        "If none of the deep models significantly outperform LightGBM, that",
+        "supports the conclusion that the ROC-AUC ceiling (~0.64) is a property",
+        "of the dataset, not a modelling limitation.",
+        "",
+        "## 4. Takeaway",
+        "",
+        "The modest AUC is consistent with the literature on this dataset.",
+        "No model – classical or deep – can reliably predict individual no-shows",
+        "because the strongest predictors simply aren't recorded in the data",
+        "(e.g., patient's current health, weather, transport).",
+        "",
+        "---",
+        f"*Raw metrics also saved to `{csv_path}`.*",
+    ]
+    return _save("\n".join(lines) + "\n", fname)
+
+
+# ─── 8. Fairness Mitigation Report ───────────────────────────────────────────
+def write_fairness_mitigation_report(
+    before_after_df: pd.DataFrame,
+    timestamp: bool = True,
+) -> str:
+    """
+    Report comparing model fairness before and after mitigation.
+    Uses Exponentiated Gradient (Agarwal et al., 2018) approach.
+    """
+    if before_after_df is None or len(before_after_df) == 0:
+        raise ValueError("before_after_df is empty - run before_after_comparison() first")
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    fname   = f"fairness_mitigation_report_{_ts()}.md" if timestamp else "fairness_mitigation_report.md"
+
+    lines = [
+        "# ClinicSense – Fairness Mitigation Report",
+        f"*Generated: {now_str}*",
+        "",
+        "---",
+        "",
+        "## 1. Motivation",
+        "",
+        "The original fairness audit (notebook 07) flagged potential disparities.",
+        "Here we apply Exponentiated Gradient reduction (fairlearn) to see if",
+        "we can reduce demographic parity difference without killing accuracy.",
+        "",
+        "## 2. Before vs After Mitigation",
+        "",
+        before_after_df.to_markdown(index=False),
+        "",
+        _fig_md("fairness_before_after.png", "Fairness Metrics – Before vs After"),
+        "",
+        "## 3. Interpretation",
+        "",
+        "- **Accuracy trade-off**: A small accuracy drop is expected; the",
+        "  question is whether the fairness gain justifies it.",
+        "- **DPD < 0.10** is generally considered fair (Barocas et al., 2019).",
+        "- Equalized odds difference should also decrease after mitigation.",
+        "",
+        "## 4. Limitations",
+        "",
+        "- Only gender was used as the sensitive feature for mitigation.",
+        "  Intersectional fairness (gender × age × scholarship) would need",
+        "  a bigger sample and more careful analysis.",
+        "- The mitigation assumes the labels are correct; if the data itself",
+        "  reflects biased scheduling, we're optimising for the wrong target.",
+        "",
+        "---",
+    ]
+    return _save("\n".join(lines) + "\n", fname)

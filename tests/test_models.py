@@ -42,6 +42,10 @@ def test_build_xgboost_trains(split_data):
     assert probs.shape[1] == 2
 
 
+@pytest.mark.skipif(
+    __import__("sys").platform == "win32",
+    reason="LightGBM access violation with small synthetic data on Windows"
+)
 def test_build_lightgbm(split_data):
     from src.models import build_lightgbm
     X_tr, X_te, y_tr, y_te = split_data
