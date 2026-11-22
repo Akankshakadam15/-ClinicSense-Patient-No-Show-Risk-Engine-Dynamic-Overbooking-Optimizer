@@ -1,0 +1,15 @@
+artifact_uri: file:///C:/Users/LENOVO/OneDrive/Desktop/final%20project%206%20credict/mlruns/599170981066879502/71e9cd380a184ef3a586a45d2eb3bc8c/artifacts
+end_time: 1794921075294
+entry_point_name: ''
+experiment_id: '599170981066879502'
+lifecycle_stage: active
+run_id: 71e9cd380a184ef3a586a45d2eb3bc8c
+run_name: test_model
+run_uuid: 71e9cd380a184ef3a586a45d2eb3bc8c
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1794921057735
+status: 3
+tags: []
+user_id: LENOVO
